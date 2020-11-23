@@ -1,0 +1,236 @@
+#!/usr/bin/ruby
+# -*- coding: UTF-8 -*-
+
+require 'Find'
+require 'open3'
+
+$REPO_SOURCE = 'git@git.gametaptap.com:tds/client-sdk/tds-sdk-all/tdsspecs.git'
+$REPO_NAME = 'tdsspecs'
+$GIT_SOURCE = 'git@git.gametaptap.com:tds/client-sdk/tds-sdk-all/tds-all-libs-ios'
+$PATH = "/Users/#{ENV['USER']}/Documents"
+
+$USE_ORIGIN
+$SPEC_NAME
+
+def matchPodspecFile path
+    specPath = Dir["#{path}/**/*.podspec"].select {|f| !f.index('-')}
+    if specPath.length == 1
+        specPath[0]
+    else
+        puts '匹配podspec文件失败：存在多个podspec文件'
+        nil
+    end
+end
+
+def cloneGit(git)
+    system "cd #$PATH && rm -rf #$SPEC_NAME && git clone #{git}"
+end
+
+def gitam (path, note)
+    system "cd #{path} && git add . && git commit -m \"#{note}\" && git push"
+end
+
+def gittag(path, tag)
+    system "cd #{path} && git tag #{tag} && git push --tags"
+end
+
+def findLocalRepoSource
+    stdout, stdeerr, status = Open3.capture3("pod repo list")
+    repos = stdout.split(/\n/)
+    hasRepo = 0
+    repos.each do |repo|
+        if repo.include?$REPO_SOURCE
+            index = repos.index(repo) - 2
+            $REPO_NAME = repos[index].strip
+            hasRepo = 1
+            break
+        end
+    end
+    if !hasRepo
+        system "pod repo add #$REPO_NAME #$REPO_SOURCE" 
+    end
+    $REPO_NAME
+end
+
+def updateLocalRepoSource
+    puts "正在更新本地源:#{findLocalRepoSource}......"
+    system "pod repo update #$REPO_NAME"
+end
+
+def getVersion specP
+    file = File.read specP 
+    pattern = /(?<=s.version          = ').*?(?=')/m
+    result = file.scan(pattern)[0]
+    result
+end
+
+def alterVersion specP, version
+    file = File.read specP 
+    pattern = /(?<=s.version          = ').*?(?=')/m
+    result = file.scan(pattern)[0]
+    if version == '0'
+        # 本地打包，不指定version
+    elsif version == '-1'
+        # 版本自增
+        if result.length > 0
+            vers = result.split('.')
+            last = (Integer(vers[-1]) + 1).to_s
+            vers[vers.length-1, 1] = last
+            ver = vers.join '.'
+            buffer = file.gsub pattern, ver
+            if not File.writable? specP then
+                #check out the file first
+                File.open(specP).chmod(0755)
+            end
+            file = File.write(specP, buffer)
+            result = ver
+        end
+    else 
+        # 指定版本
+        if result.length > 0
+            buffer = file.gsub pattern, version
+            if not File.writable? specP then
+                #check out the file first
+                File.open(specP).chmod(0755)
+            end
+            file = File.write(specP, buffer)
+            result = version
+        end
+    end
+    result
+end
+
+def podPackage path, name
+    system "cd #{path} && pod package #{name} --force"
+end
+
+def podPublish
+end
+
+def replacePackageSource path, origin
+    cnt = ""
+    if origin
+        cnt = " :git => '#$GIT_SOURCE/#$SPEC_NAME.git', :tag => s.version.to_s"
+    else
+        cnt = " :git => '#{File.expand_path("..", path)}'"
+    end
+
+    file = File.read path
+    pattern = /(?<=s.source           = {).*?(?=})/m
+    if file.scan(pattern).length > 0
+        buffer = file.gsub pattern, cnt
+        if not File.writable? path then
+            #check out the file first
+            File.open(path).chmod(0755)
+        end
+    file = File.write(path, buffer)
+    end
+end
+
+def publish (resultP, specP)
+    puts "是否发版?(Y/N)："
+    flag = gets.strip
+    case flag
+    when "Y","y"
+        puts '请输入版本（e.g. 1.3.2-unstable），`-1`表示自增：'
+        ver = gets.strip
+        puts "正在更新本地podspec文件..."
+        alterVersion specP, ver
+        file = File.read specP
+        puts file
+        puts "正在提交代码..."
+        gitam "#$PATH/#$SPEC_NAME", "#{getVersion(specP)} Updated"
+        gittag "#$PATH/#$SPEC_NAME", getVersion(specP)
+        puts "正在远端验证..."
+        system "pod repo push #$REPO_NAME #{specP} --verbose --use-libraries --allow-warnings"
+    when "N","n"
+        system "open #{resultP}"
+    else
+        puts 'Illegal pargram.'
+        publish resultP, specP
+    end
+end
+
+def packageOrigin git
+    puts "正在使用远端代码打包(#$SPEC_NAME):#{git}"
+    puts '...'
+
+    specP = matchPodspecFile "#$PATH/#$SPEC_NAME"
+    specN = specP.split('/').at -1
+    replacePackageSource specP, true
+    repoP = "#$PATH/#$SPEC_NAME"
+    podPackage repoP, specN
+    resultP = "#{repoP}/#$SPEC_NAME-#{getVersion(specP)}/ios"
+    puts "远端代码打包完成(#{resultP})"
+    publish resultP, specP
+end
+
+def packageLocal path
+
+    specP = matchPodspecFile path
+    specN = specP.split('/').at -1
+    $SPEC_NAME = specN.split('.').at 0
+    puts "正在使用本地代码打包:#{specN}"
+    puts '...'
+    replacePackageSource specP, false
+    podPackage path, specN
+    resultP = "#{File.expand_path("..", specP)}/#$SPEC_NAME-#{getVersion(specP)}/ios"
+    puts "本地代码打包完成(#{resultP})"
+    publish resultP, specP
+end
+
+def package
+    # 更新本地源
+    updateLocalRepoSource
+    # 打包
+    if $USE_ORIGIN
+        # 获取包名、版本号
+        puts '请输入仓库名（e.g. tdsmomentsource）：'
+        $SPEC_NAME = gets.strip
+        # 拉取远端仓库
+        gitS = "#$GIT_SOURCE/#{$SPEC_NAME}.git"
+        puts "正在拉取远端仓库源码:#{$SPEC_NAME}"
+        cloneGit gitS
+        packageOrigin gitS
+    else
+        # 获取本地地址
+        puts '请输入本地仓库地址（e.g. ~/Documents/tdstapdbsource）：'
+        path = gets.strip
+        packageLocal path
+    end
+end
+
+def checkPodPlugin
+    stdout, stdeerr, status = Open3.capture3("gem list")
+    local_gems = stdout.split(/\n/)
+    has_pod_plugin = false
+    local_gems.each do |gem|
+        if gem.include?'cocoapods-packager'
+            has_pod_plugin = true
+            break
+        end
+    end
+    if !has_pod_plugin
+        system "gem install cocoapods-packager" 
+    end
+    has_pod_plugin
+end
+
+def main 
+    puts '前置检查...'
+    checkPodPlugin
+    puts '使用远端代码打包？（Y/N）：'
+    useOrigin = gets.strip
+    case useOrigin
+    when "Y","y"
+        $USE_ORIGIN = true
+    when "N","n"
+        $USE_ORIGIN = false
+    else
+        puts 'Illegal pargram.'
+        main
+    end
+    package
+end
+
+main
