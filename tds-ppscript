@@ -16,6 +16,7 @@ def matchPodspecFile path
     specPath = Dir["#{path}/**/*.podspec"].select {|f| !f.index('-')}
     if specPath.length == 1
         specPath[0]
+        
     else
         puts '匹配podspec文件失败：存在多个podspec文件'
         nil
@@ -59,14 +60,14 @@ end
 
 def getVersion specP
     file = File.read specP 
-    pattern = /(?<=s.version          = ').*?(?=')/m
+    pattern = /s.version\s*=\s*'\K[^']*/m
     result = file.scan(pattern)[0]
     result
 end
 
 def alterVersion specP, version
     file = File.read specP 
-    pattern = /(?<=s.version          = ').*?(?=')/m
+    pattern = /s.version\s*=\s*'\K[^']*/m
     result = file.scan(pattern)[0]
     if version == '0'
         # 本地打包，不指定version
@@ -116,7 +117,7 @@ def replacePackageSource path, origin
     end
 
     file = File.read path
-    pattern = /(?<=s.source           = {).*?(?=})/m
+    pattern = /s.source\s*=\s*{\K[^}]*/m
     if file.scan(pattern).length > 0
         buffer = file.gsub pattern, cnt
         if not File.writable? path then
@@ -194,7 +195,7 @@ def package
         packageOrigin gitS
     else
         # 获取本地地址
-        puts '请输入本地仓库地址（e.g. ~/Documents/tdstapdbsource）：'
+        puts '请输入本地仓库地址（e.g. /Users/jocer/Documents/tdstapdbsource）：'
         path = gets.strip
         packageLocal path
     end
