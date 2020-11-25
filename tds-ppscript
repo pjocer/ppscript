@@ -12,31 +12,44 @@ $PATH = "/Users/#{ENV['USER']}/Documents"
 $USE_ORIGIN
 $SPEC_NAME
 
-def matchPodspecFile path
-    specPath = Dir["#{path}/**/*.podspec"].select {|f| !f.index('-')}
-    if specPath.length == 1
-        specPath[0]
-        
+def syscall cmd, msg = 'PP-ERROR', a_exit = true, a_verbose = true
+    cmd = a_verbose ? "#{cmd} --verbose" : cmd
+    stdout, stdeerr, status = Open3.capture3(cmd)
+    if status.success?
+        puts "#{cmd}:#{stdout}"
     else
-        puts '匹配podspec文件失败：存在多个podspec文件'
-        nil
+        puts "#{cmd}(#{msg}):#{stdeerr}"
+        if a_exit
+            exit
+        end
+    end
+    stdout
+end
+
+def matchPodspecFile path
+    specPath = Dir["#{path}/*.podspec"][0]
+    if specPath.length > 0
+        specPath
+    else
+        puts "匹配podspec文件失败：目标路径的一级目录存在多个podspec文件"
+        exit
     end
 end
 
 def cloneGit(git)
-    system "cd #$PATH && rm -rf #$SPEC_NAME && git clone #{git}"
+    syscall "cd #$PATH && rm -rf #$SPEC_NAME && git clone #{git}", "拉取仓库失败(#{git})"
 end
 
 def gitam (path, note)
-    system "cd #{path} && git add . && git commit -m \"#{note}\" && git push"
+    syscall "cd #{path} && git add . && git commit -m \"#{note}\" && git push", "提交代码失败"
 end
 
 def gittag(path, tag)
-    system "cd #{path} && git tag #{tag} && git push --tags"
+    syscall "cd #{path} && git tag #{tag} && git push --tags", "打Tag失败"
 end
 
 def findLocalRepoSource
-    stdout, stdeerr, status = Open3.capture3("pod repo list")
+    stdout = syscall "pod repo list", "获取本地pod源列表失败"
     repos = stdout.split(/\n/)
     hasRepo = 0
     repos.each do |repo|
@@ -48,14 +61,14 @@ def findLocalRepoSource
         end
     end
     if !hasRepo
-        system "pod repo add #$REPO_NAME #$REPO_SOURCE" 
+        syscall "pod repo add #$REPO_NAME #$REPO_SOURCE", "添加私有源失败"
     end
     $REPO_NAME
 end
 
 def updateLocalRepoSource
     puts "正在更新本地源:#{findLocalRepoSource}......"
-    system "pod repo update #$REPO_NAME"
+    syscall "pod repo update #$REPO_NAME", "更新 #$REPO_NAME 失败"
 end
 
 def getVersion specP
@@ -102,7 +115,7 @@ def alterVersion specP, version
 end
 
 def podPackage path, name
-    system "cd #{path} && pod package #{name} --force"
+    syscall "cd #{path} && pod package #{name} --force", "打包失败"
 end
 
 def podPublish
@@ -143,9 +156,9 @@ def publish (resultP, specP)
         gitam "#$PATH/#$SPEC_NAME", "#{getVersion(specP)} Updated"
         gittag "#$PATH/#$SPEC_NAME", getVersion(specP)
         puts "正在远端验证..."
-        system "pod repo push #$REPO_NAME #{specP} --verbose --use-libraries --allow-warnings"
+        syscall "pod repo push #$REPO_NAME #{specP} --use-libraries --allow-warnings", "发版失败"
     when "N","n"
-        system "open #{resultP}"
+        syscall "open #{resultP}", "打开包地址失败", true, false
     else
         puts 'Illegal pargram.'
         publish resultP, specP
@@ -189,8 +202,8 @@ def package
         puts '请输入仓库名（e.g. tdsmomentsource）：'
         $SPEC_NAME = gets.strip
         # 拉取远端仓库
-        gitS = "#$GIT_SOURCE/#{$SPEC_NAME}.git"
-        puts "正在拉取远端仓库源码:#{$SPEC_NAME}"
+        gitS = "#$GIT_SOURCE/#$SPEC_NAME.git"
+        puts "正在拉取远端仓库源码:#$SPEC_NAME"
         cloneGit gitS
         packageOrigin gitS
     else
@@ -201,25 +214,50 @@ def package
     end
 end
 
-def checkPodPlugin
-    stdout, stdeerr, status = Open3.capture3("gem list")
-    local_gems = stdout.split(/\n/)
-    has_pod_plugin = false
-    local_gems.each do |gem|
-        if gem.include?'cocoapods-packager'
-            has_pod_plugin = true
+def s_gem_l n
+    g_out = syscall 'gem list --local', '拉取gem列表失败'
+    l_gems = g_out.split(/\n/)
+    r = false
+    l_gems.each do |g|
+        if g.include? n
+            r = true
             break
         end
     end
-    if !has_pod_plugin
-        system "gem install cocoapods-packager" 
+    if !r
+        puts "gem未安装#{n},ruby当前版本是#{syscall('ruby -v', '获取ruby版本失败')}"
+        puts "继续在homebrew中检索#{n}..."
+        r = syscall("brew search #{n}", "homebrew未安装#{n}", false).length > 0 ? true : false
+        if r 
+            puts "homebrew已安装#{n}"
+        end
+    else
+        puts "gem已安装#{n}"
     end
-    has_pod_plugin
+    r
+end
+
+def c_install n
+    r = s_gem_l n
+    if !r
+        puts "未安装#{n}，输入安装方式（gem/homebrew）："
+        install = gets.strip
+        case install
+        when 'gem'
+            puts "正在安装#{n}:`sudo gem install #{n}`"
+            syscall "sudo gem install #{n}", "安装#{n}失败"
+        when 'homebrew'
+            puts "正在安装#{n}:`brew install #{n}`"
+            syscall "brew install #{n}", "安装#{n}失败"
+        end
+    end
+    r
 end
 
 def main 
     puts '前置检查...'
-    checkPodPlugin
+    c_install 'cocoapods'
+    c_install 'cocoapods-packager'
     puts '使用远端代码打包？（Y/N）：'
     useOrigin = gets.strip
     case useOrigin
