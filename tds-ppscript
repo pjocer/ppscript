@@ -20,7 +20,7 @@ def syscall cmd, msg = 'PP-ERROR', a_exit = true, a_verbose = true
     cmd = a_verbose ? "#{cmd} --verbose" : cmd
     stdout, stdeerr, status = Open3.capture3(cmd)
     if status.success?
-        puts "#{cmd}:#{stdout}"
+        puts "#{cmd}:#{stdout}" if stdout.length > 0
     else
         puts "#{cmd}(#{msg}):#{stdeerr}"
         if a_exit
@@ -31,11 +31,11 @@ def syscall cmd, msg = 'PP-ERROR', a_exit = true, a_verbose = true
 end
 
 def matchPodspecFile path
-    specPath = Dir["#{path}/*.podspec"][0]
-    if specPath.length > 0
-        specPath
+    specPath = Dir["#{path}/*.podspec"]
+    if specPath.length == 1
+        specPath[0]
     else
-        puts "匹配podspec文件失败：目标路径的一级目录存在多个podspec文件"
+        puts "匹配podspec文件失败：目标路径的一级目录中，podspec文件检索异常：#{specPath}"
         exit
     end
 end
@@ -70,8 +70,7 @@ def sync_repo_files r_p, s_p, f_n
     rp = r_p + "/#{f_n}.framework"
     f_p = "#$PATH/#{f_n}"
     t_p = "#{f_p}/#{f_n}/Frameworks"
-    syscall "rm -rf #{t_p} && mkdir #{t_p}", '迁移framework失败', true, false
-    syscall "cp -R #{rp} #{t_p}/#{f_n}.framework && rm -rf #{File.expand_path("..", r_p)}", "迁移#{rp}失败", true, false
+    syscall "rm -rf #{t_p} && mkdir #{t_p} && cp -R #{rp} #{t_p}/#{f_n}.framework && rm -rf #{File.expand_path("..", r_p)}", "迁移#{rp}失败", true, false
     # 更新版本  
     specP = matchPodspecFile f_p
     ver = alterVersion specP, getVersion(s_p)
