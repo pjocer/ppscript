@@ -3,6 +3,9 @@
 
 require 'Find'
 require 'open3'
+require 'net/https'
+require 'uri'
+require 'json'
 
 $REPO_SOURCE = 'git@git.gametaptap.com:tds/client-sdk/tds-sdk-all/tdsspecs.git'
 $REPO_NAME = 'tdsspecs'
@@ -11,6 +14,7 @@ $PATH = "/Users/#{ENV['USER']}/Documents"
 
 $USE_ORIGIN
 $SPEC_NAME
+$SHELL_TYPE
 
 def syscall cmd, msg = 'PP-ERROR', a_exit = true, a_verbose = true
     cmd = a_verbose ? "#{cmd} --verbose" : cmd
@@ -36,8 +40,49 @@ def matchPodspecFile path
     end
 end
 
-def cloneGit(git)
-    syscall "cd #$PATH && rm -rf #$SPEC_NAME && git clone #{git}", "拉取仓库失败(#{git})"
+# check repo files
+def c_repo_files p
+    puts "正在校验仓库文件"
+    puts "..."
+    # check CHANGELOG
+    if !(Dir["#{p}/CHANGLOG.md"].length > 0)
+        syscall "cd #{p} && touch CHANGLOG.md", "创建CHANGLOG失败", true, false
+    end
+    # check README
+    if !(Dir["#{p}/README.md"].length > 0)
+        syscall "cd #{p} && touch README.md", "创建README失败", true, false
+    end
+    # check .gitignore
+    File.open("#{p}/.gitignore", "w+") { |f|
+        uri = URI("https://www.toptal.com/developers/gitignore/api/xcode,objective-c,cocoapods,macos,swift")
+        res = Net::HTTP.get_response(uri)
+        f << res.body
+        f << "\n*-*/"
+    }
+end
+
+# sync repo files
+# 
+def sync_repo_files r_p, s_p, f_n
+    puts "正在更新framework仓："
+    puts "..."
+    # 迁移framework
+    rp = r_p + "/#{f_n}.framework"
+    f_p = "#$PATH/#{f_n}"
+    t_p = "#{f_p}/#{f_n}/Frameworks"
+    syscall "rm -rf #{t_p} && mkdir #{t_p}", '迁移framework失败', true, false
+    syscall "cp -R #{rp} #{t_p}/#{f_n}.framework && rm -rf #{File.expand_path("..", r_p)}", "迁移#{rp}失败", true, false
+    # 更新版本  
+    specP = matchPodspecFile f_p
+    ver = alterVersion specP, getVersion(s_p)
+    # 同步podspec
+
+end
+
+def cloneGit(n)
+    git = "#$GIT_SOURCE/#{n}.git"
+    syscall "cd #$PATH && rm -rf #{n} && git clone #{git}", "拉取仓库失败(#{git})"
+    git
 end
 
 def gitam (path, note)
@@ -78,47 +123,61 @@ def getVersion specP
     result
 end
 
+def get_timestamp
+    Time.new.strftime("%Y%m%d%H%M")[2, 10]
+end
+
 def alterVersion specP, version
     file = File.read specP 
     pattern = /s.version\s*=\s*'\K[^']*/m
-    result = file.scan(pattern)[0]
+    result = file.scan(pattern)
+    if !(result.length > 0)
+        pattern = /s.version\s*=\s*"\K[^"]*/m
+        result = file.scan(pattern)
+        if !(result.length > 0)
+            puts "匹配#{specP} version失败"
+            exit
+        end
+    end
     if version == '0'
         # 本地打包，不指定version
     elsif version == '-1'
-        # 版本自增
-        if result.length > 0
-            vers = result.split('.')
-            last = (Integer(vers[-1]) + 1).to_s
-            vers[vers.length-1, 1] = last
+        # 自增版本 
+        vers = result[0].split('.')
+        ver = result[0]
+        t_stamp = get_timestamp
+        if vers.size == 3
+            vers << "#{t_stamp}"
             ver = vers.join '.'
-            buffer = file.gsub pattern, ver
-            if not File.writable? specP then
-                #check out the file first
-                File.open(specP).chmod(0755)
-            end
-            file = File.write(specP, buffer)
-            result = ver
+        elsif vers.size == 4
+            vers[3] = t_stamp
+            ver = vers.join '.'
+        else
+            puts "当前版本号长度异常(#{result[0]})，请主动输入版本号："
+            ver = gets.strip
         end
+        buffer = file.gsub pattern, ver
+        if not File.writable? specP then
+            #check out the file first
+            File.open(specP).chmod(0755)
+        end
+        file = File.write(specP, buffer)
+        result = [ver]
     else 
         # 指定版本
-        if result.length > 0
-            buffer = file.gsub pattern, version
-            if not File.writable? specP then
-                #check out the file first
-                File.open(specP).chmod(0755)
-            end
-            file = File.write(specP, buffer)
-            result = version
+        buffer = file.gsub pattern, version
+        if not File.writable? specP then
+            #check out the file first
+            File.open(specP).chmod(0755)
         end
+        file = File.write(specP, buffer)
+        result = [version]
     end
-    result
+    result[0]
 end
 
 def podPackage path, name
     syscall "cd #{path} && pod package #{name} --force", "打包失败"
-end
-
-def podPublish
 end
 
 def replacePackageSource path, origin
@@ -141,56 +200,107 @@ def replacePackageSource path, origin
     end
 end
 
-def publish (resultP, specP)
+def replacePackageName p, s
+    file = File.read p
+    pattern = /s.name\s*=\s*'\K[^']*/m
+    sn = file.scan(pattern)
+    if sn.length > 0
+        buffer = file.gsub pattern, s ? (
+            if !sn[0].include?"Source"
+                 sn = sn[0] + "Source"
+            end
+            sn
+        ) : (
+            if sn[0].include?"Source"
+                sn = sn[0].gsub /Source/, ''
+            end
+            sn 
+        )
+        if not File.writable? p then
+            #check out the file first
+            File.open(p).chmod(0755)
+        end
+        file = File.write(p, buffer)
+    end
+    sn
+end
+
+def publish_f r_p, s_p, f_n
+    puts "正在拉取远端framework仓:#{f_n}："
+    puts "..."
+    cloneGit "#{f_n}"
+    c_repo_files "#$PATH/#{f_n}"
+    sync_repo_files r_p, s_p, f_n
+    f_p = "#$PATH/#{f_n}"
+    ver = getVersion s_p
+    puts "正在提交代码..."
+    gitam "#{f_p}", "#{ver} Updated"
+    gittag "#{f_p}", ver
+    puts "正在远端验证..."
+    specP = matchPodspecFile f_p
+    syscall "pod repo push #$REPO_NAME #{specP} --use-libraries --allow-warnings", "发版失败:#{f_n} #{ver}"
+    puts "已成功发版#{f_n} #{ver}"
+end
+
+def publish (r_p, s_p, f_n)
     puts "是否发版?(Y/N)："
     flag = gets.strip
     case flag
     when "Y","y"
-        puts '请输入版本（e.g. 1.3.2-unstable），`-1`表示自增：'
+        puts '请输入版本（e.g. 1.3.2-unstable），`-1`表示自动：'
         ver = gets.strip
-        puts "正在更新本地podspec文件..."
-        alterVersion specP, ver
-        file = File.read specP
+        puts "正在更新podspec文件..."
+        # 更新PodName
+        replacePackageName s_p, true
+        # 更新版本号
+        ver = alterVersion s_p, ver
+        # 更新source
+        replacePackageSource s_p, true
+        file = File.read s_p
         puts file
         puts "正在提交代码..."
-        gitam "#$PATH/#$SPEC_NAME", "#{getVersion(specP)} Updated"
-        gittag "#$PATH/#$SPEC_NAME", getVersion(specP)
+        gitam "#$PATH/#$SPEC_NAME", "#{ver} Updated"
+        gittag "#$PATH/#$SPEC_NAME", ver
         puts "正在远端验证..."
-        syscall "pod repo push #$REPO_NAME #{specP} --use-libraries --allow-warnings", "发版失败"
+        syscall "pod repo push #$REPO_NAME #{s_p} --allow-warnings", "发版失败:#$SPEC_NAME #{ver}"
+        puts "已成功发版#$SPEC_NAME #{ver}"
+        publish_f r_p, s_p, f_n
     when "N","n"
-        syscall "open #{resultP}", "打开包地址失败", true, false
+        syscall "open #{r_p}", "打开包地址失败", true, false
     else
         puts 'Illegal pargram.'
-        publish resultP, specP
+        publish r_p, s_p, f_n
     end
 end
 
 def packageOrigin git
+    c_repo_files "#$PATH/#$SPEC_NAME"
     puts "正在使用远端代码打包(#$SPEC_NAME):#{git}"
     puts '...'
-
     specP = matchPodspecFile "#$PATH/#$SPEC_NAME"
     specN = specP.split('/').at -1
     replacePackageSource specP, true
+    n = replacePackageName specP, false
     repoP = "#$PATH/#$SPEC_NAME"
     podPackage repoP, specN
-    resultP = "#{repoP}/#$SPEC_NAME-#{getVersion(specP)}/ios"
+    resultP = "#{repoP}/#{n}-#{getVersion(specP)}/ios"
     puts "远端代码打包完成(#{resultP})"
-    publish resultP, specP
+    publish resultP, specP, n
 end
 
 def packageLocal path
-
+    c_repo_files "#{path}"
     specP = matchPodspecFile path
     specN = specP.split('/').at -1
     $SPEC_NAME = specN.split('.').at 0
     puts "正在使用本地代码打包:#{specN}"
     puts '...'
     replacePackageSource specP, false
+    n = replacePackageName specP, false
     podPackage path, specN
-    resultP = "#{File.expand_path("..", specP)}/#$SPEC_NAME-#{getVersion(specP)}/ios"
+    resultP = "#{File.expand_path("..", specP)}/#{n}-#{getVersion(specP)}/ios"
     puts "本地代码打包完成(#{resultP})"
-    publish resultP, specP
+    publish resultP, specP, n
 end
 
 def package
@@ -202,10 +312,8 @@ def package
         puts '请输入仓库名（e.g. tdsmomentsource）：'
         $SPEC_NAME = gets.strip
         # 拉取远端仓库
-        gitS = "#$GIT_SOURCE/#$SPEC_NAME.git"
         puts "正在拉取远端仓库源码:#$SPEC_NAME"
-        cloneGit gitS
-        packageOrigin gitS
+        packageOrigin cloneGit $SPEC_NAME
     else
         # 获取本地地址
         puts '请输入本地仓库地址（e.g. /Users/jocer/Documents/tdstapdbsource）：'
