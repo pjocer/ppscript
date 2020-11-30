@@ -6,6 +6,7 @@ require 'open3'
 require 'net/https'
 require 'uri'
 require 'json'
+require 'cocoapods'
 
 $REPO_SOURCE = 'git@git.gametaptap.com:tds/client-sdk/tds-sdk-all/tdsspecs.git'
 $REPO_NAME = 'tdsspecs'
@@ -59,6 +60,28 @@ def c_repo_files p
         f << res.body
         f << "\n*-*/"
     }
+    # check podspec
+
+    ## alter target_xcconfig with simulator/arm64
+    s_p = matchPodspecFile p
+    file = File.open(s_p)
+    if not File.writable? s_p then
+        #check out the file first
+        file = File.open(s_p).chmod(0755)
+    end
+    file_s = file.read 
+    s = " 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'arm64' "
+    pattern = /s.pod_target_xcconfig\s*=\s*{\K[^}]*/m
+    result = file_s.scan(pattern)
+    buffer = file_s
+    if result.length == 0
+        lines = IO.readlines file
+        lines[-2] << "  s.pod_target_xcconfig = { 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'arm64' }\n  s.user_target_xcconfig = { 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'arm64' }\n"
+        buffer = lines.join ""
+    else
+        buffer = file_s.gsub(pattern, s).gsub(/s.user_target_xcconfig\s*=\s*{\K[^}]*/m, s)
+    end
+    File.write(s_p, buffer)
 end
 
 # sync repo files
@@ -75,7 +98,26 @@ def sync_repo_files r_p, s_p, f_n
     specP = matchPodspecFile f_p
     ver = alterVersion specP, getVersion(s_p)
     # 同步podspec
-
+    fs,ls = ''
+    File.open(s_p) {|f|
+        f.each_line do |l|
+            fs = l if l.include? 's.frameworks'
+            ls = l if l.include? 's.library'
+        end
+    }
+    buffer = ''
+    File.open(specP) {|f|
+        f.each_line do |l|
+            if l.include? 's.frameworks'
+                buffer += fs
+            elsif l.include? 's.library'
+                buffer += ls
+            else
+                buffer += l
+            end
+        end
+    }
+    File.write(specP, buffer)
 end
 
 def cloneGit(n)
@@ -207,11 +249,15 @@ def replacePackageName p, s
         buffer = file.gsub pattern, s ? (
             if !sn[0].include?"Source"
                  sn = sn[0] + "Source"
+            else
+                sn = sn[0]
             end
             sn
         ) : (
             if sn[0].include?"Source"
                 sn = sn[0].gsub /Source/, ''
+            else
+                sn = sn[0]
             end
             sn 
         )
