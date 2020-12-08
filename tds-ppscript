@@ -46,8 +46,8 @@ def c_repo_files p
     puts "正在校验仓库文件"
     puts "..."
     # check CHANGELOG
-    if !(Dir["#{p}/CHANGLOG.md"].length > 0)
-        syscall "cd #{p} && touch CHANGLOG.md", "创建CHANGLOG失败", true, false
+    if !(Dir["#{p}/CHANGELOG.md"].length > 0)
+        syscall "cd #{p} && touch CHANGELOG.md", "创建CHANGELOG失败", true, false
     end
     # check README
     if !(Dir["#{p}/README.md"].length > 0)
@@ -246,18 +246,17 @@ def replacePackageName p, s
     pattern = /s.name\s*=\s*'\K[^']*/m
     sn = file.scan(pattern)
     if sn.length > 0
+        sn = sn[0]
         buffer = file.gsub pattern, s ? (
-            if !sn[0].include?"Source"
-                 sn = sn[0] + "Source"
-            else
-                sn = sn[0]
+            if !sn.include?"Source"
+                sn = sn + "Source"
             end
             sn
         ) : (
-            if sn[0].include?"Source"
-                sn = sn[0].gsub /Source/, ''
+            if sn.include?"Source"
+                sn = sn.gsub /Source/, ''
             else
-                sn = sn[0]
+                sn = sn
             end
             sn 
         )
