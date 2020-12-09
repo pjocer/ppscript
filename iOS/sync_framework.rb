@@ -29,6 +29,7 @@ def sync_version
     pattern = /s.version\s*=\s*"\K[^"]*/m
     result = file.scan(pattern)
     ver = get_version($ORI_SPEC_PATH)
+    puts "get ver #{ver}"
     if result.length > 0
         buffer = file.gsub pattern, ver
         if not File.writable? $SPEC_PATH  then
@@ -36,6 +37,7 @@ def sync_version
         end
         file = File.write($SPEC_PATH , buffer)
     end
+    puts "result ver #{ver}"
     ver
 end
 
