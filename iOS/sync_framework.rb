@@ -35,6 +35,8 @@ def sync_version
         if not File.writable? $SPEC_PATH  then
             File.open($SPEC_PATH ).chmod(0755)
         end
+        puts "put buffer #{buffer}"
+        puts "put path #{$SPEC_PATH}"
         file = File.write($SPEC_PATH , buffer)
     end
     puts "result ver #{ver}"
