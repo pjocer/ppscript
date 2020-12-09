@@ -69,8 +69,12 @@ end
 
 def sync_framework
     resultP = "#{File.expand_path("..", $ORI_SPEC_PATH)}/ios/#$SPEC_NAME.framework"
-    targetP = "#$REPO_PATH/#$SPEC_NAME/#$SPEC_NAME.framework"
-    system "cp -R #{resultP} #{targetP} && rm -rf #{resultP}"
+    targetP = "#$REPO_PATH/#$SPEC_NAME/"
+    if File::directory?(targetP)
+        system "rm -rf #{targetP}"
+    end
+    Dir.mkdir(targetP)
+    system "cp -R #{resultP} #{targetP}/#$SPEC_NAME.framework && rm -rf #{resultP}"
 end
 
 def sync
