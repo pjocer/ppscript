@@ -11,7 +11,7 @@ $ORI_SPEC_PATH = Dir["#$PATH/#$SPEC_NAME/**/*.podspec"][0]
 
 def get_version path
     file = File.read path
-    pattern = /s.version\s{0,}=\s{0,}"\K[^"]*/m
+    pattern = /s.version\s{0,}=\s{0,}["']\K[^"']*/m
     result = file.scan(pattern)
     if !(result.length > 0)
         pattern = /s.version\s*=\s*"\K[^"]*/m
@@ -26,7 +26,7 @@ end
 
 def sync_version
     file = File.read $SPEC_PATH 
-    pattern = /s.version\s{0,}=\s{0,}"\K[^"]*/m
+    pattern = /s.version\s{0,}=\s{0,}["']\K[^"']*/m
     result = file.scan(pattern)
     ver = get_version($ORI_SPEC_PATH)
     if result.length > 0
