@@ -26,7 +26,7 @@ end
 
 def sync_version
     file = File.read $SPEC_PATH 
-    pattern = /s.version\s*=\s*"\K[^"]*/m
+    pattern = /s.version\s?=\s?"\K[^"]*/m
     result = file.scan(pattern)
     ver = get_version($ORI_SPEC_PATH)
     puts "get ver #{ver}"
