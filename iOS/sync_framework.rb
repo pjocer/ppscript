@@ -30,6 +30,7 @@ def sync_version
     result = file.scan(pattern)
     ver = get_version($ORI_SPEC_PATH)
     puts "get ver #{ver}"
+    puts "put result #{result} pattern #{pattern}"
     if result.length > 0
         buffer = file.gsub pattern, ver
         if not File.writable? $SPEC_PATH  then
