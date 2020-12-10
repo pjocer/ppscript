@@ -41,7 +41,7 @@ def sync_version
 end
 
 def sync_configs
-    fs,ls = ''
+    fs,ls = '', ''
     File.open($ORI_SPEC_PATH) {|f|
         f.each_line do |l|
             fs = l if l.include? 's.frameworks'
