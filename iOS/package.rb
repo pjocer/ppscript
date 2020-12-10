@@ -55,7 +55,7 @@ def mv_result
         system "rm -rf #{targetP}"
     end
     Dir.mkdir(targetP)
-    system "cp -R #{resultP} #{targetP} && rm -rf #{resultP}"
+    system "cp -R #{resultP} #{targetP} && mv #{resultP} ./build"
 end
 
 def main
