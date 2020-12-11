@@ -92,7 +92,7 @@ def sync_repo_files r_p, s_p, f_n
     # 迁移framework
     rp = r_p + "/#{f_n}.framework"
     f_p = "#$PATH/#{f_n}"
-    t_p = "#{f_p}/#{f_n}/Frameworks"
+    t_p = "#{f_p}/#{f_n}"
     syscall "rm -rf #{t_p} && mkdir #{t_p} && cp -R #{rp} #{t_p}/#{f_n}.framework && rm -rf #{File.expand_path("..", r_p)}", "迁移#{rp}失败", true, false
     # 更新版本  
     specP = matchPodspecFile f_p
